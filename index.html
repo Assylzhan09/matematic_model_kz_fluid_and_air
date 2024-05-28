@@ -1,0 +1,944 @@
+<!-- ASSYLZHAN SATMAGAMBETOV - DESHTI DEVELOPMENT  -->>
+<!DOCTYPE HTML>
+<html>
+<head>
+<title>Течение симулятор математический модель</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=620">
+<style>
+	body {background-color:#ffffff; font-family:Arial, sans-serif; font-size:14px;
+					text-align:center;}
+	p {margin-left:auto; margin-right:auto; width:600px;}
+	input {font-size:115%;}
+	input[type="range"] {width:90px;}
+	select {font-size:115%;}
+</style>
+</head>
+
+<body>
+
+<h2>Течение симулятор математический модель</h2>
+
+<canvas id="theCanvas" width="600" height="240">Это приложение работает только в современных браузеры. Для достижения наилучших результатов используйте Google Chrome.</canvas>
+
+<div>
+	<select id="sizeSelect" onchange="resize()">
+		<option value="10">60 x 24</option>
+		<option value="8">75 x 30</option>
+		<option value="6">100 x 40</option>
+		<option value="5">120 x 48</option>
+		<option value="4">150 x 60</option>
+		<option value="3">200 x 80</option>
+		<option value="2">300 x 120</option>
+		<option value="1">600 x 240</option>
+	</select>
+	<input id="resetFluidButton" type="button" onclick="initFluid()" value="Сброс">
+	<input id="stepButton" type="button" onclick="simulate()" value="По шагам">
+	<input id="startButton" type="button" onclick="startStop()" value="Начать">
+</div>
+<div>
+	Скорость потока = <span id="speedValue">0.100</span> 
+	<input id="speedSlider" type="range" min="0" max="0.12" step="0.005" value="0.1" onchange="adjustSpeed()">
+	&nbsp;&nbsp;Вязкость = <span id="viscValue">0.020</span>
+	<input id="viscSlider" type="range" min="0.005" max="0.2" step="0.005" value="0.02" onchange="adjustViscosity()">
+</div>
+<div style="margin-top:3px">
+	<select id="mouseSelect">
+		<option value="draw">Нарисовать барьеры</option>
+		<option value="erase">Удалит барьеры</option>
+		<option value="push">Только жидкость</option>
+	</select>
+	<select id="barrierSelect" onchange="placePresetBarrier()">
+		<option>Фигуры барьеры</option>
+	</select>
+	<input id="clearButton" type="button" onclick="clearBarriers()" value="Очистить барьеры">
+</div>
+<div>
+	<select id="plotSelect" onchange="paintCanvas()">
+		<option>Показать плотность</option>
+		<option>Показать x ускорение</option>
+		<option>Показать y ускорение</option>
+		<option>Показать скорость</option>
+		<option selected>Показать завихрение</option>
+	</select>
+	&nbsp;&nbsp;Контраст:
+	<input id="contrastSlider" type="range" min="-10" max="10" step="1" value="0" onchange="paintCanvas()">
+</div>
+<div>
+	Скорость симуляции:
+	<input id="stepsSlider" type="range" min="1" max="40" step="1" value="20" onchange="resetTimer()">
+	&nbsp;&nbsp;Шаги в секунду: <span id="speedReadout">0</span>
+	&nbsp;&nbsp;<input id="rafCheck" type="checkbox" checked onchange="resetTimer()">Быстрее
+</div>
+<div style="margin-top:4px">
+	Показать:
+	<input id="tracerCheck" type="checkbox" onchange="initTracers()">Трейсеры
+	<input id="flowlineCheck" type="checkbox" onchange="paintCanvas()">Выкидные линии
+	<input id="forceCheck" type="checkbox" onchange="paintCanvas()">Сила на барьерах
+	<input id="sensorCheck" type="checkbox" onchange="paintCanvas()">Датчик
+	<input id="dataCheck" type="checkbox" onchange="showData()">Данные
+</div>
+<div id="dataSection" style="display:none">
+	<textarea id="dataArea" rows="8" cols="50" disabled readonly></textarea>
+	<div>
+		<input id="dataButton" type="button" value="Начать получение данных" onclick="startOrStopData()">
+		<input id="periodButton" type="button" value="Показать период F_y" onclick="showPeriod()">
+		<input id="barrierDataButton" type="button" value="Показать местонахождение барьеров" onclick="showBarrierLocations()">
+		<input id="debugButton" type="button" value="Debug" onclick="debug()" style="display:none">
+	</div>
+</div>
+<p style="text-align:left">Это моделирование двумерной жидкости. Первоначально жидкость течет слева направо, и линейный барьер (показан черным) отклоняет жидкость и создает вихри. Цвета обозначают завиток или локальное вращательное движение жидкости. Используйте элементы управления, чтобы регулировать скорость и вязкость потока, рисовать различные барьеры, перетаскивать жидкость, отображать другие величины, помимо завитка, показывать силу, действующую жидкостью на барьеры, а также измерять плотность и скорость жидкости в любой точке.</p>
+</p>
+
+
+<p style="text-align:left">
+	Контакты:
+</p>
+<div style="margin-left:auto; margin-right:auto; width:600px;">
+	<ul>
+	<li><a href="https://deshti.kz/landing/">Обратится разработчикам</a></li>
+	</ul>
+</div>
+
+<script src="barrierdata.js"></script>
+<script>
+	// Global variables:	
+	var mobile = navigator.userAgent.match(/iPhone|iPad|iPod|Android|BlackBerry|Opera Mini|IEMobile/i)
+	var canvas = document.getElementById('theCanvas');
+	var context = canvas.getContext('2d');
+	var image = context.createImageData(canvas.width, canvas.height);		
+	for (var i=3; i<image.data.length; i+=4) image.data[i] = 255;			
+	var sizeSelect = document.getElementById('sizeSelect');
+	sizeSelect.selectedIndex = 5;
+	if (mobile) sizeSelect.selectedIndex = 1;		
+	var pxPerSquare = Number(sizeSelect.options[sizeSelect.selectedIndex].value);
+													
+	var xdim = canvas.width / pxPerSquare;			
+	var ydim = canvas.height / pxPerSquare;
+	var stepsSlider = document.getElementById('stepsSlider');
+	var startButton = document.getElementById('startButton');
+	var speedSlider = document.getElementById('speedSlider');
+	var speedValue = document.getElementById('speedValue');
+	var viscSlider = document.getElementById('viscSlider');
+	var viscValue = document.getElementById('viscValue');
+	var mouseSelect = document.getElementById('mouseSelect');
+	var barrierSelect = document.getElementById('barrierSelect');
+	for (var barrierIndex=0; barrierIndex<barrierList.length; barrierIndex++) {
+		var shape = document.createElement("option");
+		shape.text = barrierList[barrierIndex].name;
+		barrierSelect.add(shape, null);
+	}
+	var plotSelect = document.getElementById('plotSelect');
+	var contrastSlider = document.getElementById('contrastSlider');
+	var tracerCheck = document.getElementById('tracerCheck');
+	var flowlineCheck = document.getElementById('flowlineCheck');
+	var forceCheck = document.getElementById('forceCheck');
+	var sensorCheck = document.getElementById('sensorCheck');
+	var dataCheck = document.getElementById('dataCheck');
+	var rafCheck = document.getElementById('rafCheck');
+	var speedReadout = document.getElementById('speedReadout');
+	var dataSection = document.getElementById('dataSection');
+	var dataArea = document.getElementById('dataArea');
+	var dataButton = document.getElementById('dataButton');
+	var running = false;					
+	var stepCount = 0;
+	var startTime = 0;
+	var four9ths = 4.0 / 9.0;				
+	var one9th = 1.0 / 9.0;
+	var one36th = 1.0 / 36.0;
+	var barrierCount = 0;
+	var barrierxSum = 0;
+	var barrierySum = 0;
+	var barrierFx = 0.0;					
+	var barrierFy = 0.0;
+	var sensorX = xdim / 2;					
+	var sensorY = ydim / 2;
+	var draggingSensor = false;
+	var mouseIsDown = false;
+	var mouseX, mouseY;						
+	var oldMouseX = -1, oldMouseY = -1;		
+	var collectingData = false;
+	var time = 0;								
+	var showingPeriod = false;
+	var lastBarrierFy = 1;					
+	var lastFyOscTime = 0;					
+
+	canvas.addEventListener('mousedown', mouseDown, false);
+	canvas.addEventListener('mousemove', mouseMove, false);
+	document.body.addEventListener('mouseup', mouseUp, false);
+	canvas.addEventListener('touchstart', mouseDown, false);
+	canvas.addEventListener('touchmove', mouseMove, false);
+	document.body.addEventListener('touchend', mouseUp, false);
+
+	var n0 = new Array(xdim*ydim);			
+	var nN = new Array(xdim*ydim);
+	var nS = new Array(xdim*ydim);
+	var nE = new Array(xdim*ydim);
+	var nW = new Array(xdim*ydim);
+	var nNE = new Array(xdim*ydim);
+	var nSE = new Array(xdim*ydim);
+	var nNW = new Array(xdim*ydim);
+	var nSW = new Array(xdim*ydim);
+	var rho = new Array(xdim*ydim);		
+	var ux = new Array(xdim*ydim);		
+	var uy = new Array(xdim*ydim);
+	var curl = new Array(xdim*ydim);
+	var barrier = new Array(xdim*ydim);		
+
+	for (var y=0; y<ydim; y++) {
+		for (var x=0; x<xdim; x++) {
+			barrier[x+y*xdim] = false;
+		}
+	}
+
+	var barrierSize = 8;
+	if (mobile) barrierSize = 4;
+	for (var y=(ydim/2)-barrierSize; y<=(ydim/2)+barrierSize; y++) {
+		var x = Math.round(ydim/3);
+		barrier[x+y*xdim] = true;
+	}
+
+	var nColors = 400;
+	var hexColorList = new Array(nColors+2);
+	var redList = new Array(nColors+2);
+	var greenList = new Array(nColors+2);
+	var blueList = new Array(nColors+2);
+	for (var c=0; c<=nColors; c++) {
+		var r, g, b;
+		if (c < nColors/8) {
+			r = 0; g = 0; b = Math.round(255 * (c + nColors/8) / (nColors/4));
+		} else if (c < 3*nColors/8) {
+			r = 0; g = Math.round(255 * (c - nColors/8) / (nColors/4)); b = 255;
+		} else if (c < 5*nColors/8) {
+			r = Math.round(255 * (c - 3*nColors/8) / (nColors/4)); g = 255; b = 255 - r;
+		} else if (c < 7*nColors/8) {
+			r = 255; g = Math.round(255 * (7*nColors/8 - c) / (nColors/4)); b = 0;
+		} else {
+			r = Math.round(255 * (9*nColors/8 - c) / (nColors/4)); g = 0; b = 0;
+		}
+		redList[c] = r; greenList[c] = g; blueList[c] = b;
+		hexColorList[c] = rgbToHex(r, g, b);
+	}
+	redList[nColors+1] = 0; greenList[nColors+1] = 0; blueList[nColors+1] = 0;	
+	hexColorList[nColors+1] = rgbToHex(0, 0, 0);
+
+	function componentToHex(c) {
+		var hex = c.toString(16);
+		return hex.length == 1 ? "0" + hex : hex;
+	}
+	function rgbToHex(r, g, b) {
+		return "#" + componentToHex(r) + componentToHex(g) + componentToHex(b);
+	}
+
+	var transBlackArraySize = 50;
+	var transBlackArray = new Array(transBlackArraySize);
+	for (var i=0; i<transBlackArraySize; i++) {
+		transBlackArray[i] = "rgba(0,0,0," + Number(i/transBlackArraySize).toFixed(2) + ")";
+	}
+
+	var nTracers = 144;
+	var tracerX = new Array(nTracers);
+	var tracerY = new Array(nTracers);
+	for (var t=0; t<nTracers; t++) {
+		tracerX[t] = 0.0; tracerY[t] = 0.0;
+	}
+
+	initFluid();
+
+	window.requestAnimFrame = (function(callback) {
+		return 	window.requestAnimationFrame || 
+			window.webkitRequestAnimationFrame || 
+			window.mozRequestAnimationFrame || 
+			window.oRequestAnimationFrame || 
+			window.msRequestAnimationFrame ||
+			function(callback) {
+				window.setTimeout(callback, 1);	
+			};
+	})();
+
+	function simulate() {
+		var stepsPerFrame = Number(stepsSlider.value);			
+		setBoundaries();
+		var pushing = false;
+		var pushX, pushY, pushUX, pushUY;
+		if (mouseIsDown && mouseSelect.selectedIndex==2) {
+			if (oldMouseX >= 0) {
+				var gridLoc = canvasToGrid(mouseX, mouseY);
+				pushX = gridLoc.x;
+				pushY = gridLoc.y;
+				pushUX = (mouseX - oldMouseX) / pxPerSquare / stepsPerFrame;
+				pushUY = -(mouseY - oldMouseY) / pxPerSquare / stepsPerFrame;	
+				if (Math.abs(pushUX) > 0.1) pushUX = 0.1 * Math.abs(pushUX) / pushUX;
+				if (Math.abs(pushUY) > 0.1) pushUY = 0.1 * Math.abs(pushUY) / pushUY;
+				pushing = true;
+			}
+			oldMouseX = mouseX; oldMouseY = mouseY;
+		} else {
+			oldMouseX = -1; oldMouseY = -1;
+		}
+		for (var step=0; step<stepsPerFrame; step++) {
+			collide();
+			stream();
+			if (tracerCheck.checked) moveTracers();
+			if (pushing) push(pushX, pushY, pushUX, pushUY);
+			time++;
+			if (showingPeriod && (barrierFy > 0) && (lastBarrierFy <=0)) {
+				var thisFyOscTime = time - barrierFy/(barrierFy-lastBarrierFy);
+				if (lastFyOscTime > 0) {
+					var period = thisFyOscTime - lastFyOscTime;
+					dataArea.innerHTML += Number(period).toFixed(2) + "\n";
+					dataArea.scrollTop = dataArea.scrollHeight;
+				}
+				lastFyOscTime = thisFyOscTime;
+			}
+			lastBarrierFy = barrierFy;
+		}
+		paintCanvas();
+		if (collectingData) {
+			writeData();
+			if (time >= 10000) startOrStopData();
+		}
+		if (running) {
+			stepCount += stepsPerFrame;
+			var elapsedTime = ((new Date()).getTime() - startTime) / 1000;
+			speedReadout.innerHTML = Number(stepCount/elapsedTime).toFixed(0);
+		}
+		var stable = true;
+		for (var x=0; x<xdim; x++) {
+			var index = x + (ydim/2)*xdim;	
+			if (rho[index] <= 0) stable = false;
+		}
+		if (!stable) {
+			window.alert("Моделирование стало нестабильным из-за чрезмерных скоростей жидкости.");
+			startStop();
+			initFluid();
+		}
+		if (running) {
+			if (rafCheck.checked) {
+				requestAnimFrame(function() { simulate(); });	
+			} else {
+				window.setTimeout(simulate, 1);	
+			}
+		}
+	}
+
+	function setBoundaries() {
+		var u0 = Number(speedSlider.value);
+		for (var x=0; x<xdim; x++) {
+			setEquil(x, 0, u0, 0, 1);
+			setEquil(x, ydim-1, u0, 0, 1);
+		}
+		for (var y=1; y<ydim-1; y++) {
+			setEquil(0, y, u0, 0, 1);
+			setEquil(xdim-1, y, u0, 0, 1);
+		}
+	}
+
+	function collide() {
+		var viscosity = Number(viscSlider.value);	
+		var omega = 1 / (3*viscosity + 0.5);	
+		for (var y=1; y<ydim-1; y++) {
+			for (var x=1; x<xdim-1; x++) {
+				var i = x + y*xdim;		
+				var thisrho = n0[i] + nN[i] + nS[i] + nE[i] + nW[i] + nNW[i] + nNE[i] + nSW[i] + nSE[i];
+				rho[i] = thisrho;
+				var thisux = (nE[i] + nNE[i] + nSE[i] - nW[i] - nNW[i] - nSW[i]) / thisrho;
+				ux[i] = thisux;
+				var thisuy = (nN[i] + nNE[i] + nNW[i] - nS[i] - nSE[i] - nSW[i]) / thisrho;
+				uy[i] = thisuy
+				var one9thrho = one9th * thisrho;	
+				var one36thrho = one36th * thisrho;
+				var ux3 = 3 * thisux;
+				var uy3 = 3 * thisuy;
+				var ux2 = thisux * thisux;
+				var uy2 = thisuy * thisuy;
+				var uxuy2 = 2 * thisux * thisuy;
+				var u2 = ux2 + uy2;
+				var u215 = 1.5 * u2;
+				n0[i]  += omega * (four9ths*thisrho * (1                        - u215) - n0[i]);
+				nE[i]  += omega * (   one9thrho * (1 + ux3       + 4.5*ux2        - u215) - nE[i]);
+				nW[i]  += omega * (   one9thrho * (1 - ux3       + 4.5*ux2        - u215) - nW[i]);
+				nN[i]  += omega * (   one9thrho * (1 + uy3       + 4.5*uy2        - u215) - nN[i]);
+				nS[i]  += omega * (   one9thrho * (1 - uy3       + 4.5*uy2        - u215) - nS[i]);
+				nNE[i] += omega * (  one36thrho * (1 + ux3 + uy3 + 4.5*(u2+uxuy2) - u215) - nNE[i]);
+				nSE[i] += omega * (  one36thrho * (1 + ux3 - uy3 + 4.5*(u2-uxuy2) - u215) - nSE[i]);
+				nNW[i] += omega * (  one36thrho * (1 - ux3 + uy3 + 4.5*(u2-uxuy2) - u215) - nNW[i]);
+				nSW[i] += omega * (  one36thrho * (1 - ux3 - uy3 + 4.5*(u2+uxuy2) - u215) - nSW[i]);
+			}
+		}
+		for (var y=1; y<ydim-2; y++) {
+			nW[xdim-1+y*xdim] = nW[xdim-2+y*xdim];
+			nNW[xdim-1+y*xdim] = nNW[xdim-2+y*xdim];
+			nSW[xdim-1+y*xdim] = nSW[xdim-2+y*xdim];
+		}
+	}
+
+	function stream() {
+		barrierCount = 0; barrierxSum = 0; barrierySum = 0;
+		barrierFx = 0.0; barrierFy = 0.0;
+		for (var y=ydim-2; y>0; y--) {	
+			for (var x=1; x<xdim-1; x++) {
+				nN[x+y*xdim] = nN[x+(y-1)*xdim];
+				nNW[x+y*xdim] = nNW[x+1+(y-1)*xdim];
+			}
+		}
+		for (var y=ydim-2; y>0; y--) {
+			for (var x=xdim-2; x>0; x--) {
+				nE[x+y*xdim] = nE[x-1+y*xdim];
+				nNE[x+y*xdim] = nNE[x-1+(y-1)*xdim];
+			}
+		}
+		for (var y=1; y<ydim-1; y++) {
+			for (var x=xdim-2; x>0; x--) {
+				nS[x+y*xdim] = nS[x+(y+1)*xdim];
+				nSE[x+y*xdim] = nSE[x-1+(y+1)*xdim];	
+			}
+		}
+		for (var y=1; y<ydim-1; y++) {
+			for (var x=1; x<xdim-1; x++) {
+				nW[x+y*xdim] = nW[x+1+y*xdim];
+				nSW[x+y*xdim] = nSW[x+1+(y+1)*xdim];
+			}
+		}
+		for (var y=1; y<ydim-1; y++) {
+			for (var x=1; x<xdim-1; x++) {
+				if (barrier[x+y*xdim]) {
+					var index = x + y*xdim;
+					nE[x+1+y*xdim] = nW[index];
+					nW[x-1+y*xdim] = nE[index];
+					nN[x+(y+1)*xdim] = nS[index];
+					nS[x+(y-1)*xdim] = nN[index];
+					nNE[x+1+(y+1)*xdim] = nSW[index];
+					nNW[x-1+(y+1)*xdim] = nSE[index];
+					nSE[x+1+(y-1)*xdim] = nNW[index];
+					nSW[x-1+(y-1)*xdim] = nNE[index];
+					barrierCount++;
+					barrierxSum += x;
+					barrierySum += y;
+					barrierFx += nE[index] + nNE[index] + nSE[index] - nW[index] - nNW[index] - nSW[index];
+					barrierFy += nN[index] + nNE[index] + nNW[index] - nS[index] - nSE[index] - nSW[index];
+				}
+			}
+		}
+	}
+
+	function moveTracers() {
+		for (var t=0; t<nTracers; t++) {
+			var roundedX = Math.round(tracerX[t]);
+			var roundedY = Math.round(tracerY[t]);
+			var index = roundedX + roundedY*xdim;
+			tracerX[t] += ux[index];
+			tracerY[t] += uy[index];
+			if (tracerX[t] > xdim-1) {
+				tracerX[t] = 0;
+				tracerY[t] = Math.random() * ydim;
+			}
+		}
+	}
+
+	function push(pushX, pushY, pushUX, pushUY) {
+		var margin = 3;
+		if ((pushX > margin) && (pushX < xdim-1-margin) && (pushY > margin) && (pushY < ydim-1-margin)) {
+			for (var dx=-1; dx<=1; dx++) {
+				setEquil(pushX+dx, pushY+2, pushUX, pushUY);
+				setEquil(pushX+dx, pushY-2, pushUX, pushUY);
+			}
+			for (var dx=-2; dx<=2; dx++) {
+				for (var dy=-1; dy<=1; dy++) {
+					setEquil(pushX+dx, pushY+dy, pushUX, pushUY);
+				}
+			}
+		}
+	}
+
+
+	function setEquil(x, y, newux, newuy, newrho) {
+		var i = x + y*xdim;
+		if (typeof newrho == 'undefined') {
+			newrho = rho[i];
+		}
+		var ux3 = 3 * newux;
+		var uy3 = 3 * newuy;
+		var ux2 = newux * newux;
+		var uy2 = newuy * newuy;
+		var uxuy2 = 2 * newux * newuy;
+		var u2 = ux2 + uy2;
+		var u215 = 1.5 * u2;
+		n0[i]  = four9ths * newrho * (1                              - u215);
+		nE[i]  =   one9th * newrho * (1 + ux3       + 4.5*ux2        - u215);
+		nW[i]  =   one9th * newrho * (1 - ux3       + 4.5*ux2        - u215);
+		nN[i]  =   one9th * newrho * (1 + uy3       + 4.5*uy2        - u215);
+		nS[i]  =   one9th * newrho * (1 - uy3       + 4.5*uy2        - u215);
+		nNE[i] =  one36th * newrho * (1 + ux3 + uy3 + 4.5*(u2+uxuy2) - u215);
+		nSE[i] =  one36th * newrho * (1 + ux3 - uy3 + 4.5*(u2-uxuy2) - u215);
+		nNW[i] =  one36th * newrho * (1 - ux3 + uy3 + 4.5*(u2-uxuy2) - u215);
+		nSW[i] =  one36th * newrho * (1 - ux3 - uy3 + 4.5*(u2+uxuy2) - u215);
+		rho[i] = newrho;
+		ux[i] = newux;
+		uy[i] = newuy;
+	}
+
+	function initTracers() {
+		if (tracerCheck.checked) {
+			var nRows = Math.ceil(Math.sqrt(nTracers));
+			var dx = xdim / nRows;
+			var dy = ydim / nRows;
+			var nextX = dx / 2;
+			var nextY = dy / 2;
+			for (var t=0; t<nTracers; t++) {
+				tracerX[t] = nextX;
+				tracerY[t] = nextY;
+				nextX += dx;
+				if (nextX > xdim) {
+					nextX = dx / 2;
+					nextY += dy;
+				}
+			}
+		}
+		paintCanvas();
+	}
+
+	function paintCanvas() {
+		var cIndex=0;
+		var contrast = Math.pow(1.2,Number(contrastSlider.value));
+		var plotType = plotSelect.selectedIndex;
+		if (plotType == 4) computeCurl();
+		for (var y=0; y<ydim; y++) {
+			for (var x=0; x<xdim; x++) {
+				if (barrier[x+y*xdim]) {
+					cIndex = nColors + 1;
+				} else {
+					if (plotType == 0) {
+						cIndex = Math.round(nColors * ((rho[x+y*xdim]-1)*6*contrast + 0.5));
+					} else if (plotType == 1) {
+						cIndex = Math.round(nColors * (ux[x+y*xdim]*2*contrast + 0.5));
+					} else if (plotType == 2) {
+						cIndex = Math.round(nColors * (uy[x+y*xdim]*2*contrast + 0.5));
+					} else if (plotType == 3) {
+						var speed = Math.sqrt(ux[x+y*xdim]*ux[x+y*xdim] + uy[x+y*xdim]*uy[x+y*xdim]);
+						cIndex = Math.round(nColors * (speed*4*contrast));
+					} else {
+						cIndex = Math.round(nColors * (curl[x+y*xdim]*5*contrast + 0.5));
+					}
+					if (cIndex < 0) cIndex = 0;
+					if (cIndex > nColors) cIndex = nColors;
+				}
+				colorSquare(x, y, redList[cIndex], greenList[cIndex], blueList[cIndex]);
+			
+			}
+		}
+		context.putImageData(image, 0, 0);
+		if (tracerCheck.checked) drawTracers();
+		if (flowlineCheck.checked) drawFlowlines();
+		if (forceCheck.checked) drawForceArrow(barrierxSum/barrierCount, barrierySum/barrierCount, barrierFx, barrierFy);
+		if (sensorCheck.checked) drawSensor();
+	}
+
+	function colorSquare(x, y, r, g, b) {
+
+		var flippedy = ydim - y - 1;
+		for (var py=flippedy*pxPerSquare; py<(flippedy+1)*pxPerSquare; py++) {
+			for (var px=x*pxPerSquare; px<(x+1)*pxPerSquare; px++) {
+				var index = (px + py*image.width) * 4;
+				image.data[index+0] = r;
+				image.data[index+1] = g;
+				image.data[index+2] = b;
+			}
+		}
+	}
+
+	function computeCurl() {
+		for (var y=1; y<ydim-1; y++) {			
+			for (var x=1; x<xdim-1; x++) {
+				curl[x+y*xdim] = uy[x+1+y*xdim] - uy[x-1+y*xdim] - ux[x+(y+1)*xdim] + ux[x+(y-1)*xdim];
+			}
+		}
+	}
+
+	function drawTracers() {
+		context.fillStyle = "rgb(150,150,150)";
+		for (var t=0; t<nTracers; t++) {
+			var canvasX = (tracerX[t]+0.5) * pxPerSquare;
+			var canvasY = canvas.height - (tracerY[t]+0.5) * pxPerSquare;
+			context.fillRect(canvasX-1, canvasY-1, 2, 2);
+		}
+	}
+
+	function drawFlowlines() {
+		var pxPerFlowline = 10;
+		if (pxPerSquare == 1) pxPerFlowline = 6;
+		if (pxPerSquare == 2) pxPerFlowline = 8;
+		if (pxPerSquare == 5) pxPerFlowline = 12;
+		if ((pxPerSquare == 6) || (pxPerSquare == 8)) pxPerFlowline = 15;
+		if (pxPerSquare == 10) pxPerFlowline = 20;
+		var sitesPerFlowline = pxPerFlowline / pxPerSquare;
+		var xLines = canvas.width / pxPerFlowline;
+		var yLines = canvas.height / pxPerFlowline;
+		for (var yCount=0; yCount<yLines; yCount++) {
+			for (var xCount=0; xCount<xLines; xCount++) {
+				var x = Math.round((xCount+0.5) * sitesPerFlowline);
+				var y = Math.round((yCount+0.5) * sitesPerFlowline);
+				var thisUx = ux[x+y*xdim];
+				var thisUy = uy[x+y*xdim];
+				var speed = Math.sqrt(thisUx*thisUx + thisUy*thisUy);
+				if (speed > 0.0001) {
+					var px = (xCount+0.5) * pxPerFlowline;
+					var py = canvas.height - ((yCount+0.5) * pxPerFlowline);
+					var scale = 0.5 * pxPerFlowline / speed;
+					context.beginPath();
+					context.moveTo(px-thisUx*scale, py+thisUy*scale);
+					context.lineTo(px+thisUx*scale, py-thisUy*scale);
+					var cIndex = Math.round(speed * transBlackArraySize / 0.3);
+					if (cIndex >= transBlackArraySize) cIndex = transBlackArraySize - 1;
+					context.strokeStyle = transBlackArray[cIndex];
+					context.stroke();
+				}
+			}
+		}
+	}
+
+	function drawForceArrow(x, y, Fx, Fy) {
+		context.fillStyle = "rgba(100,100,100,0.7)";
+		context.translate((x + 0.5) * pxPerSquare, canvas.height - (y + 0.5) * pxPerSquare);
+		var magF = Math.sqrt(Fx*Fx + Fy*Fy);
+		context.scale(4*magF, 4*magF);
+		context.rotate(Math.atan2(-Fy, Fx));
+		context.beginPath();
+		context.moveTo(0, 3);
+		context.lineTo(100, 3);
+		context.lineTo(100, 12);
+		context.lineTo(130, 0);
+		context.lineTo(100, -12);
+		context.lineTo(100, -3);
+		context.lineTo(0, -3);
+		context.lineTo(0, 3);
+		context.fill();
+		context.setTransform(1, 0, 0, 1, 0, 0);
+	}
+
+	function drawSensor() {
+		var canvasX = (sensorX+0.5) * pxPerSquare;
+		var canvasY = canvas.height - (sensorY+0.5) * pxPerSquare;
+		context.fillStyle = "rgba(180,180,180,0.7)";
+		context.beginPath();
+		context.arc(canvasX, canvasY, 7, 0, 2*Math.PI);
+		context.fill();
+		context.strokeStyle = "#404040";
+		context.linewidth = 1;
+		context.beginPath();
+		context.moveTo(canvasX, canvasY-10);
+		context.lineTo(canvasX, canvasY+10);
+		context.moveTo(canvasX-10, canvasY);
+		context.lineTo(canvasX+10, canvasY);
+		context.stroke();
+		context.fillStyle = "rgba(255,255,255,0.5)";
+		canvasX += 10;
+		context.font = "12px Monospace";
+		var rectWidth = context.measureText("00000000000").width+6;
+		var rectHeight = 58;
+		if (canvasX+rectWidth > canvas.width) canvasX -= (rectWidth+20);
+		if (canvasY+rectHeight > canvas.height) canvasY = canvas.height - rectHeight;
+		context.fillRect(canvasX, canvasY, rectWidth, rectHeight);
+		context.fillStyle = "#000000";
+		canvasX += 3;
+		canvasY += 12;
+		var coordinates = "  (" + sensorX + "," + sensorY + ")";
+		context.fillText(coordinates, canvasX, canvasY);
+		canvasY += 14;
+		var rhoSymbol = String.fromCharCode(parseInt('03C1',16));
+		var index = sensorX + sensorY * xdim;
+		context.fillText(" " + rhoSymbol + " =  " + Number(rho[index]).toFixed(3), canvasX, canvasY);
+		canvasY += 14;
+		var digitString = Number(ux[index]).toFixed(3);
+		if (ux[index] >= 0) digitString = " " + digitString;
+		context.fillText("ux = " + digitString, canvasX, canvasY);
+		canvasY += 14;
+		digitString = Number(uy[index]).toFixed(3);
+		if (uy[index] >= 0) digitString = " " + digitString;
+		context.fillText("uy = " + digitString, canvasX, canvasY);
+	}
+
+	function mouseDown(e) {
+		if (sensorCheck.checked) {
+			var canvasLoc = pageToCanvas(e.pageX, e.pageY);
+			var gridLoc = canvasToGrid(canvasLoc.x, canvasLoc.y);
+			var dx = (gridLoc.x - sensorX) * pxPerSquare;
+			var dy = (gridLoc.y - sensorY) * pxPerSquare;
+			if (Math.sqrt(dx*dx + dy*dy) <= 8) {
+				draggingSensor = true;
+			}
+		}
+		mousePressDrag(e);
+	};
+	function mouseMove(e) {
+		if (mouseIsDown) {
+			mousePressDrag(e);
+		}
+	};
+	function mouseUp(e) {
+		mouseIsDown = false;
+		draggingSensor = false;
+	};
+
+	function mousePressDrag(e) {
+		e.preventDefault();
+		mouseIsDown = true;
+		var canvasLoc = pageToCanvas(e.pageX, e.pageY);
+		if (draggingSensor) {
+			var gridLoc = canvasToGrid(canvasLoc.x, canvasLoc.y);
+			sensorX = gridLoc.x;
+			sensorY = gridLoc.y;
+			paintCanvas();
+			return;
+		}
+		if (mouseSelect.selectedIndex == 2) {
+			mouseX = canvasLoc.x;
+			mouseY = canvasLoc.y;
+			return;
+		}
+		var gridLoc = canvasToGrid(canvasLoc.x, canvasLoc.y);
+		if (mouseSelect.selectedIndex == 0) {
+			addBarrier(gridLoc.x, gridLoc.y);
+			paintCanvas();
+		} else {
+			removeBarrier(gridLoc.x, gridLoc.y);
+		}
+	}
+
+	function pageToCanvas(pageX, pageY) {
+		var canvasX = pageX - canvas.offsetLeft;
+		var canvasY = pageY - canvas.offsetTop;
+		return { x:canvasX, y:canvasY };
+	}
+
+	function canvasToGrid(canvasX, canvasY) {
+		var gridX = Math.floor(canvasX / pxPerSquare);
+		var gridY = Math.floor((canvas.height - 1 - canvasY) / pxPerSquare);
+		return { x:gridX, y:gridY };
+	}
+
+	function addBarrier(x, y) {
+		if ((x > 1) && (x < xdim-2) && (y > 1) && (y < ydim-2)) {
+			barrier[x+y*xdim] = true;
+		}
+	}
+
+	function removeBarrier(x, y) {
+		if (barrier[x+y*xdim]) {
+			barrier[x+y*xdim] = false;
+			paintCanvas();
+		}
+	}
+
+	function clearBarriers() {
+		for (var x=0; x<xdim; x++) {
+			for (var y=0; y<ydim; y++) {
+				barrier[x+y*xdim] = false;
+			}
+		}
+		paintCanvas();
+	}
+
+	function resize() {
+		var tempRho = new Array(canvas.width*canvas.height);
+		var tempUx = new Array(canvas.width*canvas.height);
+		var tempUy = new Array(canvas.width*canvas.height);
+		var tempBarrier = new Array(canvas.width*canvas.height);
+		for (var y=0; y<canvas.height; y++) {
+			for (var x=0; x<canvas.width; x++) {
+				var tempIndex = x + y*canvas.width;
+				var xOld = Math.floor(x / pxPerSquare);
+				var yOld = Math.floor(y / pxPerSquare);
+				var oldIndex = xOld + yOld*xdim;
+				tempRho[tempIndex] = rho[oldIndex];
+				tempUx[tempIndex] = ux[oldIndex];
+				tempUy[tempIndex] = uy[oldIndex];
+				tempBarrier[tempIndex] = barrier[oldIndex];
+			}
+		}
+		var oldPxPerSquare = pxPerSquare;
+		pxPerSquare = Number(sizeSelect.options[sizeSelect.selectedIndex].value);
+		var growRatio = oldPxPerSquare / pxPerSquare;
+		xdim = canvas.width / pxPerSquare;
+		ydim = canvas.height / pxPerSquare;
+		n0 = new Array(xdim*ydim);
+		nN = new Array(xdim*ydim);
+		nS = new Array(xdim*ydim);
+		nE = new Array(xdim*ydim);
+		nW = new Array(xdim*ydim);
+		nNE = new Array(xdim*ydim);
+		nSE = new Array(xdim*ydim);
+		nNW = new Array(xdim*ydim);
+		nSW = new Array(xdim*ydim);
+		rho = new Array(xdim*ydim);
+		ux = new Array(xdim*ydim);
+		uy = new Array(xdim*ydim);
+		curl = new Array(xdim*ydim);
+		barrier = new Array(xdim*ydim);
+		for (var yNew=0; yNew<ydim; yNew++) {
+			for (var xNew=0; xNew<xdim; xNew++) {
+				var rhoTotal = 0;
+				var uxTotal = 0;
+				var uyTotal = 0;
+				var barrierTotal = 0;
+				for (var y=yNew*pxPerSquare; y<(yNew+1)*pxPerSquare; y++) {
+					for (var x=xNew*pxPerSquare; x<(xNew+1)*pxPerSquare; x++) {
+						var index = x + y*canvas.width;
+						rhoTotal += tempRho[index];
+						uxTotal += tempUx[index];
+						uyTotal += tempUy[index];
+						if (tempBarrier[index]) barrierTotal++;
+					}
+				}
+				setEquil(xNew, yNew, uxTotal/(pxPerSquare*pxPerSquare), uyTotal/(pxPerSquare*pxPerSquare), rhoTotal/(pxPerSquare*pxPerSquare))
+				curl[xNew+yNew*xdim] = 0.0;
+				barrier[xNew+yNew*xdim] = (barrierTotal >= pxPerSquare*pxPerSquare/2);
+			}
+		}
+		setBoundaries();
+		if (tracerCheck.checked) {
+			for (var t=0; t<nTracers; t++) {
+				tracerX[t] *= growRatio;
+				tracerY[t] *= growRatio;
+			}
+		}
+		sensorX = Math.round(sensorX * growRatio);
+		sensorY = Math.round(sensorY * growRatio);
+		paintCanvas();
+		resetTimer();
+	}
+
+	function initFluid() {
+		var u0 = Number(speedSlider.value);
+		for (var y=0; y<ydim; y++) {
+			for (var x=0; x<xdim; x++) {
+				setEquil(x, y, u0, 0, 1);
+				curl[x+y*xdim] = 0.0;
+			}
+		}
+	paintCanvas();
+	}
+
+	function startStop() {
+		running = !running;
+		if (running) {
+			startButton.value = "Пауза";
+			resetTimer();
+			simulate();
+		} else {
+			startButton.value = " Старт ";
+		}
+	}
+
+	function resetTimer() {
+		stepCount = 0;
+		startTime = (new Date()).getTime();
+	}
+
+	function adjustSpeed() {
+		speedValue.innerHTML = Number(speedSlider.value).toFixed(3);
+	}
+
+	function adjustViscosity() {
+		viscValue.innerHTML = Number(viscSlider.value).toFixed(3);
+	}
+
+	function showData() {
+		if (dataCheck.checked) {
+			dataSection.style.display="block";
+		} else {
+			dataSection.style.display="none";
+		}
+	}
+
+	function startOrStopData() {
+		collectingData = !collectingData;
+		if (collectingData) {
+			time = 0;
+			dataArea.innerHTML = "Time \tDensity\tVel_x \tVel_y \tForce_x\tForce_y\n";
+			writeData();
+			dataButton.value = "Остановит получение данных";
+			showingPeriod = false;
+			periodButton.value = "Показать период F_y";
+		} else {
+			dataButton.value = "Начать получение данных";
+		}
+	}
+
+	function writeData() {
+		var timeString = String(time);
+		while (timeString.length < 5) timeString = "0" + timeString;
+		sIndex = sensorX + sensorY*xdim;
+		dataArea.innerHTML += timeString + "\t" + Number(rho[sIndex]).toFixed(4) + "\t"
+			+ Number(ux[sIndex]).toFixed(4) + "\t" + Number(uy[sIndex]).toFixed(4) + "\t"
+			+ Number(barrierFx).toFixed(4) + "\t" + Number(barrierFy).toFixed(4) + "\n";
+		dataArea.scrollTop = dataArea.scrollHeight;
+	}
+
+	function showPeriod() {
+		showingPeriod = !showingPeriod;
+		if (showingPeriod) {
+			time = 0;
+			lastBarrierFy = 1.0;
+			lastFyOscTime = -1.0;
+			dataArea.innerHTML = "Период F_y колебаний\n";
+			periodButton.value = "Остановит получение данных";
+			collectingData = false;
+			dataButton.value = "Начать получение данных";
+		} else {
+			periodButton.value = "Показать период F_y";
+		}
+	}
+
+	function showBarrierLocations() {
+		dataArea.innerHTML = '{name:"Barrier locations",\n';
+		dataArea.innerHTML += 'locations:[\n';
+		for (var y=1; y<ydim-1; y++) {
+			for (var x=1; x<xdim-1; x++) {
+				if (barrier[x+y*xdim]) dataArea.innerHTML += x + ',' + y + ',\n';
+			}
+		}
+		dataArea.innerHTML = dataArea.innerHTML.substr(0, dataArea.innerHTML.length-2);
+		dataArea.innerHTML += '\n]},\n';
+	}
+
+	function placePresetBarrier() {
+		var index = barrierSelect.selectedIndex;
+		if (index == 0) return;
+		clearBarriers();
+		var bCount = barrierList[index-1].locations.length/2;
+		var xMin = barrierList[index-1].locations[0];
+		var yMin = barrierList[index-1].locations[1];
+		var yMax = yMin;
+		for (var siteIndex=2; siteIndex<2*bCount; siteIndex+=2) {
+			if (barrierList[index-1].locations[siteIndex] < xMin) {
+				xMin = barrierList[index-1].locations[siteIndex];
+			}
+			if (barrierList[index-1].locations[siteIndex+1] < yMin) {
+				yMin = barrierList[index-1].locations[siteIndex+1];
+			}
+			if (barrierList[index-1].locations[siteIndex+1] > yMax) {
+				yMax = barrierList[index-1].locations[siteIndex+1];
+			}
+		}
+		var yAverage = Math.round((yMin+yMax)/2);
+		for (var siteIndex=0; siteIndex<2*bCount; siteIndex+=2) {
+			var x = barrierList[index-1].locations[siteIndex] - xMin + Math.round(ydim/3);
+			var y = barrierList[index-1].locations[siteIndex+1] - yAverage + Math.round(ydim/2);
+			addBarrier(x, y);
+		}
+		paintCanvas();
+		barrierSelect.selectedIndex = 0;
+	}
+
+	function debug() {
+		dataArea.innerHTML = "Трейсера местонахождение:\n";
+		for (var t=0; t<nTracers; t++) {
+			dataArea.innerHTML += tracerX[t] + ", " + tracerY[t] + "\n";
+		}
+	}
+</script>
+    
+</body>
+
+</html>
